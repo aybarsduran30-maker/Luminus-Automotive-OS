@@ -1,0 +1,15 @@
+<RCC>
+    <qresource prefix="/">
+        <file>citroen_logo.png</file>
+        <file>startup_whoosh.wav</file>
+        <file>qml/Main.qml</file>
+        <file>qml/FrenchTelemetryWidget.qml</file>
+        <file>qml/ExpandedCluster.qml</file>
+        <file>../assets/vehicles/car_left.png</file>
+        <file>../assets/vehicles/car_right.png</file>
+        <file>../assets/vehicles/car_upside.png</file>
+        <file>../assets/vehicles/car_front.png</file>
+        <file>../assets/vehicles/car_side.png</file>
+        <file>../assets/vehicles/car_back.png</file>
+    </qresource>
+</RCC>
