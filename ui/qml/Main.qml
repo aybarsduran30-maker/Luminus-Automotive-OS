@@ -7,28 +7,21 @@ Window {
     id: appWindow
     width: 1024
     height: 600
-    minimumWidth: 840
-    minimumHeight: 500
+    minimumWidth: 920
+    minimumHeight: 540
     visible: true
-    title: "Luminus Automotive OS"
+    visibility: Window.Windowed
+    title: "Luminus OS // Hyper-Cockpit"
     color: "#000000"
 
-    property int activeTab: 0
+    property int activeTab: 1
     property int themeColorIndex: 0
-    property var themeColors: ["#C5A880", "#38BDF8", "#EF4444", "#10B981", "#A855F7"]
+    property var themeColors: ["#E5A93C", "#00F0FF", "#E63946", "#F1FAEE"]
     readonly property color currentAccent: themeColors[themeColorIndex]
 
-    property int layoutMode: 0
-    property int bgMode: 2
-    property string staticBgSource: ""
-    property string liveVideoSource: Qt.resolvedUrl("../../assets/backgrounds/live_bg_1.mp4")
-    property real bgDimOpacity: 0.55
-
-    property int manualHour: 11
-    property int manualMinute: 39
-    property int manualYear: 2026
-    property int manualMonth: 9
-    property int manualDay: 14
+    property int currentWallpaperIndex: 1
+    property real bgDimOpacity: 0.40
+    property int clusterLayoutMode: 0 // 0: QUL Dual Ring, 1: Minimal HUD, 2: Performance 3D
 
     property real kerbWeight: 1090.0
     property real currentGrossWeight: 1170.0
@@ -42,9 +35,13 @@ Window {
     property real liveTripFuel: 0.0
     property var savedTripLogs: []
 
-    property int statusBgIndex: 1
-    property string statusMode: "TPMS"
+    property string statusMode: "DIAGNOSTICS"
     property bool statusRightSide: false
+    property bool splashFinished: false
+    property bool sweepCompleted: false
+
+    property real displaySpeed: 0.0
+    property real displayRpm: 0.0
 
     Item {
         anchors.fill: parent
@@ -72,136 +69,108 @@ Window {
     }
 
     Timer {
-        interval: 200
+        interval: 100
         running: tripActive && (vehicleSim.speed > 0.5)
         repeat: true
         onTriggered: {
-            liveTripDist += (vehicleSim.speed * (0.2 / 3600.0))
-            liveTripFuel += (0.0003 + (vehicleSim.throttleActive ? 0.0006 : 0.0001))
+            var stepDist = (vehicleSim.speed * (0.1 / 3600.0))
+            liveTripDist += stepDist
+            liveTripFuel += (stepDist * 0.065)
         }
     }
 
-    Item {
-        id: mediaLayer
+    MediaPlayer {
+        id: bgVideoPlayer
+        source: Qt.resolvedUrl("../../assets/backgrounds/live_bg_" + currentWallpaperIndex + ".mp4")
+        loops: MediaPlayer.Infinite
+        videoOutput: videoRenderer
+        audioOutput: null
+        Component.onCompleted: play()
+    }
+
+    VideoOutput {
+        id: videoRenderer
         anchors.fill: parent
+        fillMode: VideoOutput.PreserveAspectCrop
+    }
 
-        Rectangle {
-            anchors.fill: parent
-            visible: bgMode === 0
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#03060B" }
-                GradientStop { position: 0.45; color: "#070E18" }
-                GradientStop { position: 1.0; color: "#010204" }
-            }
-        }
+    Rectangle {
+        anchors.fill: parent
+        color: "#000000"
+        opacity: bgDimOpacity
+    }
 
-        Image {
-            anchors.fill: parent
-            visible: bgMode === 1
-            source: staticBgSource
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
+    SequentialAnimation {
+        id: gaugeSweepAnimation
+        running: false
+
+        ParallelAnimation {
+            NumberAnimation { target: appWindow; property: "displaySpeed"; from: 0; to: 220; duration: 800; easing.type: Easing.OutQuart }
+            NumberAnimation { target: appWindow; property: "displayRpm"; from: 0; to: 7000; duration: 800; easing.type: Easing.OutQuart }
         }
+        ParallelAnimation {
+            NumberAnimation { target: appWindow; property: "displaySpeed"; to: 0; duration: 600; easing.type: Easing.InOutCubic }
+            NumberAnimation { target: appWindow; property: "displayRpm"; to: 850; duration: 600; easing.type: Easing.InOutCubic }
+        }
+        ScriptAction { script: sweepCompleted = true }
+    }
+
+    Binding {
+        target: appWindow
+        property: "displaySpeed"
+        value: vehicleSim.speed
+        when: sweepCompleted
+    }
+
+    Binding {
+        target: appWindow
+        property: "displayRpm"
+        value: vehicleSim.rpm
+        when: sweepCompleted
+    }
+
+    Item {
+        id: cockpitRoot
+        anchors.fill: parent
+        opacity: splashFinished ? 1.0 : 0.0
+        visible: opacity > 0.0
+        Behavior on opacity { NumberAnimation { duration: 500 } }
 
         Item {
-            anchors.fill: parent
-            visible: bgMode === 2
-
-            MediaPlayer {
-                id: livePlayer
-                source: liveVideoSource
-                loops: MediaPlayer.Infinite
-                videoOutput: bgVideoOutput
-                Component.onCompleted: {
-                    livePlayer.play()
-                }
-            }
-
-            VideoOutput {
-                id: bgVideoOutput
-                anchors.fill: parent
-                fillMode: VideoOutput.PreserveAspectCrop
-            }
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: "#000000"
-            opacity: bgDimOpacity
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: currentAccent }
-                GradientStop { position: 0.7; color: "transparent" }
-            }
-            opacity: 0.08
-        }
-    }
-
-    Item {
-        id: mainInterface
-        anchors.fill: parent
-        opacity: 0.0
-
-        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-
-        Rectangle {
-            id: topBar
+            id: topHeader
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
-            height: 44
-            color: "#1A000000"
-            border.color: "#18FFFFFF"
-            border.width: 1
-            z: 20
+            height: 48
+            z: 30
 
             Row {
                 anchors.left: parent.left
-                anchors.leftMargin: 18
+                anchors.leftMargin: 30
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 12
 
                 Rectangle {
-                    visible: activeTab !== 0
-                    width: 74
-                    height: 26
-                    radius: 4
-                    color: "#20FFFFFF"
-                    border.color: currentAccent
-                    border.width: 1
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "< COCKPIT"
-                        color: "#FFFFFF"
-                        font.pixelSize: 9
-                        font.bold: true
-                        font.letterSpacing: 1
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            activeTab = 0
-                        }
-                    }
-                }
-
-                Rectangle {
-                    width: 6
-                    height: 6
-                    radius: 3
+                    width: 10
+                    height: 10
+                    rotation: 45
                     color: currentAccent
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
                 Text {
-                    text: "CITROEN C-ELYSEE  |  LUMINUS OS"
-                    color: currentAccent
+                    text: {
+                        switch(activeTab) {
+                            case 0: return "LUMINUS // CLUSTER LAYOUT"
+                            case 1: return "LUMINUS // DIGITAL TWIN ADAS"
+                            case 2: return "LUMINUS // POWERTRAIN TELEMETRY"
+                            case 3: return "LUMINUS // MEDIA SESSION"
+                            case 4: return "LUMINUS // TRIP COMPUTER"
+                            case 5: return "LUMINUS // SYSTEM PREFERENCES"
+                            default: return "LUMINUS OS"
+                        }
+                    }
+                    color: "#FFFFFF"
                     font.pixelSize: 11
                     font.bold: true
                     font.letterSpacing: 2
@@ -210,227 +179,136 @@ Window {
 
             Row {
                 anchors.right: parent.right
-                anchors.rightMargin: 18
+                anchors.rightMargin: 30
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 14
 
-                Text {
-                    text: manualDay + "/" + (manualMonth < 10 ? "0" + manualMonth : manualMonth) + "/" + manualYear
-                    color: "#64748B"
-                    font.pixelSize: 10
-                    font.bold: true
-                }
-
-                Text {
-                    text: (manualHour < 10 ? "0" + manualHour : manualHour) + ":" + (manualMinute < 10 ? "0" + manualMinute : manualMinute)
-                    color: "#FFFFFF"
-                    font.pixelSize: 12
-                    font.bold: true
-                }
+                Text { text: "15/09/2026"; color: "#64748B"; font.pixelSize: 10; font.bold: true }
+                Rectangle { width: 1; height: 12; color: "#334155"; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: "08:20"; color: currentAccent; font.pixelSize: 13; font.bold: true; font.family: "Consolas" }
             }
         }
 
         Item {
-            id: coreViewport
-            anchors.top: topBar.bottom
-            anchors.bottom: navigationDock.top
+            id: mainView
+            anchors.top: topHeader.bottom
+            anchors.bottom: dsNavRack.top
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.margins: 14
+            anchors.margins: 10
 
             Item {
                 visible: activeTab === 0
                 anchors.fill: parent
 
                 Item {
-                    visible: layoutMode === 0
+                    visible: clusterLayoutMode === 0
                     anchors.fill: parent
 
-                    Row {
+                    Canvas {
+                        id: qulDualRingCanvas
                         anchors.fill: parent
-                        spacing: 16
+                        property real sVal: appWindow.displaySpeed
+                        property real rVal: appWindow.displayRpm
+                        onSValChanged: requestPaint()
+                        onRValChanged: requestPaint()
 
-                        Rectangle {
-                            width: parent.width * 0.48
-                            height: parent.height
-                            radius: 16
-                            color: "#0AFFFFFF"
-                            border.color: "#18FFFFFF"
-                            border.width: 1
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
 
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 14
+                            var cy = height * 0.52
+                            var r = height * 0.38
 
-                                Text {
-                                    text: "POWERTRAIN TELEMETRY"
-                                    color: currentAccent
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    font.letterSpacing: 2
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                }
+                            var lx = width * 0.25
+                            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.08)
+                            ctx.lineWidth = 4
+                            ctx.beginPath()
+                            ctx.arc(lx, cy, r, Math.PI * 0.75, Math.PI * 1.85, false)
+                            ctx.stroke()
 
-                                Row {
-                                    spacing: 30
-                                    anchors.horizontalCenter: parent.horizontalCenter
+                            var spdEnd = Math.PI * 0.75 + (Math.PI * 1.1 * Math.min(1.0, sVal / 220.0))
+                            ctx.strokeStyle = currentAccent
+                            ctx.lineWidth = 7
+                            ctx.beginPath()
+                            ctx.arc(lx, cy, r, Math.PI * 0.75, spdEnd, false)
+                            ctx.stroke()
 
-                                    Column {
-                                        spacing: 4
-                                        Text { text: "SPEED"; color: "#64748B"; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                        Text { text: vehicleSim.speed.toFixed(0); color: "#FFFFFF"; font.pixelSize: 56; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                        Text { text: "KM/H"; color: currentAccent; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                    }
+                            var rx = width * 0.75
+                            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.08)
+                            ctx.lineWidth = 4
+                            ctx.beginPath()
+                            ctx.arc(rx, cy, r, Math.PI * 1.15, Math.PI * 2.25, false)
+                            ctx.stroke()
 
-                                    Rectangle { width: 1; height: 80; color: "#20FFFFFF"; anchors.verticalCenter: parent.verticalCenter }
-
-                                    Column {
-                                        spacing: 4
-                                        Text { text: "ENGINE"; color: "#64748B"; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                        Text { text: vehicleSim.rpm.toFixed(0); color: "#38BDF8"; font.pixelSize: 56; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                        Text { text: "RPM"; color: "#38BDF8"; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                    }
-                                }
-
-                                Rectangle {
-                                    width: 330
-                                    height: 44
-                                    radius: 8
-                                    color: "#10FFFFFF"
-                                    border.color: "#1EFFFFFF"
-
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 40
-                                        Text { text: "COOLANT: " + vehicleSim.coolantTemp.toFixed(0) + " C"; color: vehicleSim.coolantTemp > 98 ? "#EF4444" : "#94A3B8"; font.pixelSize: 11; font.bold: true }
-                                        Text { text: "BATTERY: " + vehicleSim.batteryVoltage.toFixed(1) + " V"; color: "#10B981"; font.pixelSize: 11; font.bold: true }
-                                    }
-                                }
-                            }
+                            var rpmEnd = Math.PI * 1.15 + (Math.PI * 1.1 * Math.min(1.0, rVal / 7000.0))
+                            ctx.strokeStyle = rVal > 5500 ? "#E63946" : currentAccent
+                            ctx.lineWidth = 7
+                            ctx.beginPath()
+                            ctx.arc(rx, cy, r, Math.PI * 1.15, rpmEnd, false)
+                            ctx.stroke()
                         }
+                    }
 
-                        Rectangle {
-                            width: parent.width * 0.52 - 16
-                            height: parent.height
-                            radius: 16
-                            color: "#0AFFFFFF"
-                            border.color: "#18FFFFFF"
-                            border.width: 1
+                    Column {
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: -parent.width * 0.25
+                        anchors.verticalCenterOffset: 10
+                        spacing: 2
+                        Text { text: "SPEED"; color: "#64748B"; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: appWindow.displaySpeed.toFixed(0); color: "#FFFFFF"; font.pixelSize: 84; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: "KM/H"; color: currentAccent; font.pixelSize: 12; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                    }
 
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 18
-                                spacing: 14
+                    Column {
+                        anchors.centerIn: parent
+                        anchors.verticalCenterOffset: 10
+                        spacing: 6
+                        Text { text: "GEAR"; color: currentAccent; font.pixelSize: 11; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: "D" + Math.min(5, Math.max(1, Math.floor(vehicleSim.speed / 25) + 1)); color: "#FFFFFF"; font.pixelSize: 48; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: vehicleSim.coolantTemp.toFixed(0) + " C"; color: "#94A3B8"; font.pixelSize: 11; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
+                    }
 
-                                Text { text: "DYNAMICS & QUICK LOGS"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2 }
+                    Column {
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: parent.width * 0.25
+                        anchors.verticalCenterOffset: 10
+                        spacing: 2
+                        Text { text: "TACHOMETER"; color: "#64748B"; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: appWindow.displayRpm.toFixed(0); color: appWindow.displayRpm > 5500 ? "#E63946" : currentAccent; font.pixelSize: 84; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: "RPM"; color: "#64748B"; font.pixelSize: 12; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                    }
+                }
 
-                                Rectangle {
-                                    width: parent.width
-                                    height: 74
-                                    radius: 10
-                                    color: "#12FFFFFF"
-                                    border.color: "#1EFFFFFF"
+                Item {
+                    visible: clusterLayoutMode === 1
+                    anchors.fill: parent
 
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 36
-                                        Column {
-                                            Text { text: "0-100 KM/H TIMER"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                            Text { text: vehicleSim.dragTime.toFixed(2) + " s"; color: vehicleSim.isDragRunning ? "#38BDF8" : "#FFFFFF"; font.pixelSize: 24; font.bold: true }
-                                        }
-                                        Column {
-                                            Text { text: "BEST RECORD"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                            Text { text: vehicleSim.bestDragTime > 0 ? vehicleSim.bestDragTime.toFixed(2) + " s" : "--.-- s"; color: "#10B981"; font.pixelSize: 24; font.bold: true }
-                                        }
-                                    }
-                                }
-
-                                Row {
-                                    spacing: 12
-                                    width: parent.width
-
-                                    Rectangle {
-                                        width: (parent.width - 12) / 2
-                                        height: 80
-                                        radius: 10
-                                        color: "#12FFFFFF"
-                                        border.color: tireRR < 2.0 ? "#EF4444" : "#1EFFFFFF"
-
-                                        Column {
-                                            anchors.centerIn: parent
-                                            spacing: 4
-                                            Text { text: "CHASSIS MASS"; color: "#64748B"; font.pixelSize: 9; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                            Text { text: currentGrossWeight.toFixed(0) + " KG (GROSS)"; color: "#FFFFFF"; font.pixelSize: 13; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        width: (parent.width - 12) / 2
-                                        height: 80
-                                        radius: 10
-                                        color: "#12FFFFFF"
-                                        border.color: "#1EFFFFFF"
-
-                                        Column {
-                                            anchors.centerIn: parent
-                                            spacing: 4
-                                            Text { text: "LIVE TRIP STATUS"; color: "#64748B"; font.pixelSize: 9; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                            Text { text: tripActive ? (liveTripDist.toFixed(1) + " KM REC") : "TRIP IDLE"; color: tripActive ? "#10B981" : "#94A3B8"; font.pixelSize: 13; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                        }
-                                    }
-                                }
-                            }
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 12
+                        Text { text: "VELOCITY HUD"; color: currentAccent; font.pixelSize: 12; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: appWindow.displaySpeed.toFixed(0); color: "#FFFFFF"; font.pixelSize: 130; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
+                        Row {
+                            spacing: 24
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            Text { text: "GEAR: D" + Math.min(5, Math.max(1, Math.floor(vehicleSim.speed / 25) + 1)); color: "#FFFFFF"; font.pixelSize: 18; font.bold: true; font.family: "Consolas" }
+                            Text { text: appWindow.displayRpm.toFixed(0) + " RPM"; color: currentAccent; font.pixelSize: 18; font.bold: true; font.family: "Consolas" }
                         }
                     }
                 }
 
                 Item {
-                    visible: layoutMode === 1
+                    visible: clusterLayoutMode === 2
                     anchors.fill: parent
 
-                    Grid {
+                    Column {
                         anchors.centerIn: parent
-                        columns: 3
-                        spacing: 16
-
-                        readonly property real cW: (coreViewport.width - 48) / 3
-                        readonly property real cH: (coreViewport.height - 32) / 2
-
-                        component GridItemCard : Rectangle {
-                            property string gTitle: ""
-                            property string gSub: ""
-                            property color gColor: currentAccent
-                            property int gTab: 0
-
-                            width: parent.cW
-                            height: parent.cH
-                            radius: 12
-                            color: gMouse.containsMouse ? "#20FFFFFF" : "#0DFFFFFF"
-                            border.color: gMouse.containsMouse ? gColor : "#1AFFFFFF"
-
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Text { text: gTitle; color: "#FFFFFF"; font.pixelSize: 13; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: gSub; color: gColor; font.pixelSize: 9; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                            }
-
-                            MouseArea {
-                                id: gMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    activeTab = gTab
-                                }
-                            }
-                        }
-
-                        GridItemCard { gTitle: "VEHICLE STATUS"; gSub: "CHASSIS & TPMS"; gColor: "#38BDF8"; gTab: 1 }
-                        GridItemCard { gTitle: "PERFORMANCE"; gSub: "0-100 & DYNAMICS"; gColor: "#22C55E"; gTab: 2 }
-                        GridItemCard { gTitle: "MEDIA"; gSub: "AUDIO & SINK"; gColor: "#F59E0B"; gTab: 3 }
-                        GridItemCard { gTitle: "TRIP COMPUTER"; gSub: "LOGS & CONSUMPTION"; gColor: "#10B981"; gTab: 4 }
-                        GridItemCard { gTitle: "SETTINGS"; gSub: "WALLPAPER & PREFS"; gColor: "#A855F7"; gTab: 5 }
+                        spacing: 8
+                        Text { text: "RACE TELEMETRY"; color: "#E63946"; font.pixelSize: 12; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: appWindow.displayRpm.toFixed(0); color: appWindow.displayRpm > 5500 ? "#E63946" : currentAccent; font.pixelSize: 100; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: "S" + Math.min(5, Math.max(1, Math.floor(vehicleSim.speed / 25) + 1)); color: "#FFFFFF"; font.pixelSize: 44; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: appWindow.displaySpeed.toFixed(0) + " KM/H"; color: "#94A3B8"; font.pixelSize: 24; font.bold: true; font.family: "Consolas"; anchors.horizontalCenter: parent.horizontalCenter }
                     }
                 }
             }
@@ -439,350 +317,242 @@ Window {
                 visible: activeTab === 1
                 anchors.fill: parent
 
-                Item {
-                    id: statusViewport
-                    anchors.fill: parent
+                Canvas {
+                    id: mbuxAdasRoadCanvas
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    width: parent.width * 0.72
+                    height: 250
+                    property real progressTicker: 0.0
 
-                    MediaPlayer {
-                        id: statusBgPlayer
-                        source: Qt.resolvedUrl("../../assets/backgrounds/live_bg_" + appWindow.statusBgIndex + ".mp4")
-                        audioOutput: null
-                        loops: MediaPlayer.Infinite
-                        Component.onCompleted: {
-                            statusBgPlayer.play()
+                    Timer {
+                        interval: 16
+                        running: vehicleSim.speed > 0
+                        repeat: true
+                        onTriggered: {
+                            var delta = (vehicleSim.speed / 1200.0)
+                            mbuxAdasRoadCanvas.progressTicker = (mbuxAdasRoadCanvas.progressTicker + delta) % 1.0
+                            mbuxAdasRoadCanvas.requestPaint()
                         }
                     }
 
-                    VideoOutput {
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+
+                        var vpX = width * 0.48
+                        var vpY = 15
+
+                        for (var i = 0; i < 8; ++i) {
+                            var t = (progressTicker + (i / 8.0)) % 1.0
+                            var scaleFactor = 0.08 + (t * t * 1.95)
+                            var yPos = vpY + (height - vpY) * scaleFactor
+
+                            ctx.strokeStyle = Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, scaleFactor * 0.45)
+                            ctx.lineWidth = 1 + scaleFactor * 2.5
+
+                            var span = width * 0.48 * scaleFactor
+                            ctx.beginPath()
+                            ctx.moveTo(vpX - span, yPos)
+                            ctx.lineTo(vpX + span, yPos)
+                            ctx.stroke()
+                        }
+
+                        ctx.strokeStyle = "#00F0FF"
+                        ctx.lineWidth = 3
+                        ctx.beginPath()
+                        ctx.moveTo(vpX - (width * 0.48), height)
+                        ctx.lineTo(vpX - (width * 0.05), vpY)
+                        ctx.stroke()
+
+                        ctx.beginPath()
+                        ctx.moveTo(vpX + (width * 0.48), height)
+                        ctx.lineTo(vpX + (width * 0.05), vpY)
+                        ctx.stroke()
+                    }
+                }
+
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 30
+                    anchors.left: parent.left
+                    anchors.leftMargin: parent.width * 0.06
+                    width: parent.width * 0.58
+                    height: 36
+                    radius: 18
+                    color: "#000000"
+                    opacity: 0.85
+                }
+
+                Item {
+                    id: carBox
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 15
+                    anchors.left: parent.left
+                    anchors.leftMargin: parent.width * 0.05
+                    width: parent.width * 0.60
+                    height: parent.height * 0.80
+
+                    Image {
+                        id: mainCarImage
                         anchors.fill: parent
-                        fillMode: VideoOutput.PreserveAspectCrop
+                        fillMode: Image.PreserveAspectFit
+                        source: {
+                            if (appWindow.statusMode === "WEIGHT") return "qrc:/assets/vehicles/car_upside.png"
+                            if (appWindow.statusMode === "DIAGNOSTICS") return "qrc:/assets/vehicles/car_side.png"
+                            return appWindow.statusRightSide ? "qrc:/assets/vehicles/car_right.png" : "qrc:/assets/vehicles/car_left.png"
+                        }
+                        opacity: 1.0
+                        scale: 1.0
+                        Behavior on opacity { NumberAnimation { duration: 180 } }
+                        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    }
+                }
+
+                Item {
+                    anchors.fill: carBox
+                    visible: appWindow.statusMode === "TPMS"
+
+                    Rectangle {
+                        x: appWindow.statusRightSide ? parent.width * 0.72 : parent.width * 0.14
+                        y: parent.height * 0.56
+                        width: 116
+                        height: 36
+                        radius: 18
+                        color: Qt.rgba(8/255, 16/255, 28/255, 0.75)
+                        border.color: (appWindow.statusRightSide ? tireFR : tireFL) < 2.0 ? "#E63946" : currentAccent
+                        border.width: 1.5
+
+                        Column {
+                            anchors.centerIn: parent
+                            Text { text: appWindow.statusRightSide ? "FRONT RIGHT" : "FRONT LEFT"; color: "#94A3B8"; font.pixelSize: 7; font.bold: true }
+                            Text { text: (appWindow.statusRightSide ? tireFR.toFixed(1) : tireFL.toFixed(1)) + " BAR"; color: "#FFFFFF"; font.pixelSize: 10; font.bold: true; font.family: "Consolas" }
+                        }
                     }
 
                     Rectangle {
-                        anchors.fill: parent
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#EE04060A" }
-                            GradientStop { position: 0.5; color: "#C0080D14" }
-                            GradientStop { position: 1.0; color: "#F6020406" }
+                        x: appWindow.statusRightSide ? parent.width * 0.14 : parent.width * 0.72
+                        y: parent.height * 0.56
+                        width: 116
+                        height: 36
+                        radius: 18
+                        color: Qt.rgba(8/255, 16/255, 28/255, 0.75)
+                        border.color: (appWindow.statusRightSide ? tireRR : tireRL) < 2.0 ? "#E63946" : currentAccent
+                        border.width: 1.5
+
+                        Column {
+                            anchors.centerIn: parent
+                            Text { text: appWindow.statusRightSide ? "REAR RIGHT" : "REAR LEFT"; color: "#94A3B8"; font.pixelSize: 7; font.bold: true }
+                            Text { text: (appWindow.statusRightSide ? tireRR.toFixed(1) : tireRL.toFixed(1)) + " BAR"; color: "#FFFFFF"; font.pixelSize: 10; font.bold: true; font.family: "Consolas" }
                         }
                     }
+                }
 
-                    Item {
-                        id: stageArea
-                        width: parent.width * 0.62
-                        height: parent.height
-                        anchors.left: parent.left
+                Column {
+                    width: 250
+                    anchors.right: parent.right
+                    anchors.rightMargin: 20
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 12
 
-                        Rectangle {
-                            id: groundRing
-                            width: parent.width * 0.88
-                            height: 64
-                            radius: width / 2
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 60
-                            color: "transparent"
-                            border.color: currentAccent
-                            border.width: 2
-                            opacity: 0.28
-                        }
+                    component NeonPillBtn : Item {
+                        id: pillItem
+                        property string btnText: ""
+                        property bool isActive: false
+                        property color glowColor: currentAccent
+                        signal clicked()
 
-                        Image {
-                            id: vehicleRenderer
-                            anchors.centerIn: stageArea
-                            anchors.verticalCenterOffset: -20
-                            width: parent.width * 0.85
-                            fillMode: Image.PreserveAspectFit
-                            source: {
-                                if (appWindow.statusMode === "WEIGHT") {
-                                    return "qrc:/assets/vehicles/car_upside.png"
-                                }
-                                if (appWindow.statusMode === "DIAGNOSTICS") {
-                                    return "qrc:/assets/vehicles/car_side.png"
-                                }
-                                return appWindow.statusRightSide ? "qrc:/assets/vehicles/car_right.png" : "qrc:/assets/vehicles/car_left.png"
-                            }
-
-                            Behavior on opacity {
-                                NumberAnimation { duration: 180 }
-                            }
-                        }
-
-                        Item {
-                            id: tpmsHudLayer
-                            anchors.fill: vehicleRenderer
-                            visible: appWindow.statusMode === "TPMS"
-
-                            Rectangle {
-                                x: appWindow.statusRightSide ? parent.width * 0.74 : parent.width * 0.12
-                                y: parent.height * 0.60
-                                width: 118
-                                height: 46
-                                color: "#B004070D"
-                                border.color: (appWindow.statusRightSide ? tireFR : tireFL) < 2.0 ? "#EF4444" : "#00F0FF"
-                                border.width: 1
-
-                                Column {
-                                    anchors.centerIn: parent
-                                    Text {
-                                        text: appWindow.statusRightSide ? "FRONT RIGHT" : "FRONT LEFT"
-                                        color: "#5C6E82"
-                                        font.pixelSize: 8
-                                        font.bold: true
-                                    }
-                                    Text {
-                                        text: (appWindow.statusRightSide ? tireFR.toFixed(1) : tireFL.toFixed(1)) + " BAR | 24°C"
-                                        color: (appWindow.statusRightSide ? tireFR : tireFL) < 2.0 ? "#EF4444" : "#00F0FF"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                x: appWindow.statusRightSide ? parent.width * 0.12 : parent.width * 0.74
-                                y: parent.height * 0.60
-                                width: 118
-                                height: 46
-                                color: "#B004070D"
-                                border.color: (appWindow.statusRightSide ? tireRR : tireRL) < 2.0 ? "#EF4444" : "#00F0FF"
-                                border.width: 1
-
-                                Column {
-                                    anchors.centerIn: parent
-                                    Text {
-                                        text: appWindow.statusRightSide ? "REAR RIGHT" : "REAR LEFT"
-                                        color: "#5C6E82"
-                                        font.pixelSize: 8
-                                        font.bold: true
-                                    }
-                                    Text {
-                                        text: (appWindow.statusRightSide ? tireRR.toFixed(1) : tireRL.toFixed(1)) + " BAR | 23°C"
-                                        color: (appWindow.statusRightSide ? tireRR : tireRL) < 2.0 ? "#EF4444" : "#00F0FF"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                    }
-                                }
-                            }
-                        }
-
-                        Item {
-                            id: weightHudLayer
-                            anchors.fill: vehicleRenderer
-                            visible: appWindow.statusMode === "WEIGHT"
-
-                            Rectangle {
-                                anchors.centerIn: parent
-                                anchors.verticalCenterOffset: 30
-                                width: 160
-                                height: 52
-                                color: "#B00E0803"
-                                border.color: "#FF9500"
-                                border.width: 1
-
-                                Column {
-                                    anchors.centerIn: parent
-                                    Text {
-                                        text: "TRUNK & AXLE LOAD"
-                                        color: "#8E6948"
-                                        font.pixelSize: 8
-                                        font.bold: true
-                                    }
-                                    Text {
-                                        text: (currentGrossWeight - kerbWeight).toFixed(0) + " KG / 506 L"
-                                        color: "#FF9500"
-                                        font.pixelSize: 13
-                                        font.bold: true
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Column {
-                        width: 300
-                        anchors.right: parent.right
-                        anchors.rightMargin: 20
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 10
+                        width: parent.width
+                        height: 46
 
                         Rectangle {
-                            width: parent.width
-                            height: 64
-                            color: appWindow.statusMode === "TPMS" ? "#2400F0FF" : "#8005080E"
-                            border.color: appWindow.statusMode === "TPMS" ? "#00F0FF" : "#1A2536"
-                            border.width: 1
+                            anchors.fill: parent
+                            radius: height / 2
+                            color: pillItem.isActive ? Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0.25) : Qt.rgba(4/255, 8/255, 15/255, 0.6)
+                            border.color: pillItem.isActive ? glowColor : Qt.rgba(1, 1, 1, 0.12)
+                            border.width: 1.5
 
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: {
-                                    appWindow.statusMode = "TPMS"
-                                }
+                            Rectangle {
+                                width: 22
+                                height: 22
+                                radius: 11
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: pillItem.isActive ? (parent.width - width - 12) : 12
+                                color: glowColor
+                                opacity: pillItem.isActive ? 1.0 : 0.25
+                                Behavior on x { NumberAnimation { duration: 250; easing.type: Easing.OutBack } }
                             }
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 2
-                                Text {
-                                    text: "TIRE MONITORING (TPMS)"
-                                    color: "#FFFFFF"
-                                    font.bold: true
-                                    font.pixelSize: 11
-                                }
-                                Text {
-                                    text: tireRR < 2.0 ? "WARNING: LOW PRESSURE DETECTED" : "ALL SENSORS OPTIMAL"
-                                    color: tireRR < 2.0 ? "#EF4444" : "#00F0FF"
-                                    font.pixelSize: 9
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            width: parent.width
-                            height: 34
-                            visible: appWindow.statusMode === "TPMS"
-                            color: "#8005080E"
-                            border.color: "#2C3E55"
-                            border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
-                                text: appWindow.statusRightSide ? "VIEW: RIGHT PROFILE (CLICK TO SWAP)" : "VIEW: LEFT PROFILE (CLICK TO SWAP)"
-                                color: "#00F0FF"
+                                text: pillItem.btnText
+                                color: "#FFFFFF"
                                 font.pixelSize: 9
                                 font.bold: true
                             }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: {
-                                    appWindow.statusRightSide = !appWindow.statusRightSide
-                                }
-                            }
                         }
 
-                        Rectangle {
-                            width: parent.width
-                            height: 64
-                            color: appWindow.statusMode === "WEIGHT" ? "#24FF9500" : "#8005080E"
-                            border.color: appWindow.statusMode === "WEIGHT" ? "#FF9500" : "#1A2536"
-                            border.width: 1
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: {
-                                    appWindow.statusMode = "WEIGHT"
-                                }
-                            }
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 2
-                                Text {
-                                    text: "CHASSIS LOAD DISTRIBUTION"
-                                    color: "#FFFFFF"
-                                    font.bold: true
-                                    font.pixelSize: 11
-                                }
-                                Text {
-                                    text: "GROSS: " + currentGrossWeight.toFixed(0) + " KG (KERB: " + kerbWeight.toFixed(0) + " KG)"
-                                    color: "#FF9500"
-                                    font.pixelSize: 9
-                                }
-                            }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: pillItem.clicked()
                         }
+                    }
 
-                        Rectangle {
-                            width: parent.width
-                            height: 64
-                            color: appWindow.statusMode === "DIAGNOSTICS" ? "#24FF003C" : "#8005080E"
-                            border.color: appWindow.statusMode === "DIAGNOSTICS" ? "#FF003C" : "#1A2536"
-                            border.width: 1
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: {
-                                    appWindow.statusMode = "DIAGNOSTICS"
-                                }
-                            }
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 2
-                                Text {
-                                    text: "VEHICLE DIAGNOSTICS"
-                                    color: "#FFFFFF"
-                                    font.bold: true
-                                    font.pixelSize: 11
-                                }
-                                Text {
-                                    text: "WIREFRAME TELEMETRY ACTIVE"
-                                    color: "#FF003C"
-                                    font.pixelSize: 9
-                                }
-                            }
+                    Timer {
+                        id: carTransTimer
+                        interval: 100
+                        onTriggered: {
+                            mainCarImage.opacity = 1.0
+                            mainCarImage.scale = 1.0
                         }
+                    }
 
-                        Row {
-                            width: parent.width
-                            spacing: 8
+                    NeonPillBtn {
+                        btnText: "TIRE TELEMETRY (TPMS)"
+                        isActive: appWindow.statusMode === "TPMS"
+                        glowColor: tireRR < 2.0 ? "#E63946" : currentAccent
+                        onClicked: {
+                            mainCarImage.opacity = 0.0
+                            mainCarImage.scale = 0.94
+                            appWindow.statusMode = "TPMS"
+                            carTransTimer.restart()
+                        }
+                    }
 
-                            Rectangle {
-                                width: (parent.width - 8) / 2
-                                height: 32
-                                color: "#8005080E"
-                                border.color: "#1A2536"
-                                border.width: 1
+                    NeonPillBtn {
+                        visible: appWindow.statusMode === "TPMS"
+                        btnText: appWindow.statusRightSide ? "PROFILE: RIGHT" : "PROFILE: LEFT"
+                        isActive: true
+                        glowColor: currentAccent
+                        onClicked: {
+                            mainCarImage.opacity = 0.0
+                            appWindow.statusRightSide = !appWindow.statusRightSide
+                            carTransTimer.restart()
+                        }
+                    }
 
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "PREV BG"
-                                    color: "#8CA0B8"
-                                    font.pixelSize: 9
-                                    font.bold: true
-                                }
+                    NeonPillBtn {
+                        btnText: "CHASSIS MASS & LOAD"
+                        isActive: appWindow.statusMode === "WEIGHT"
+                        glowColor: currentAccent
+                        onClicked: {
+                            mainCarImage.opacity = 0.0
+                            mainCarImage.scale = 0.94
+                            appWindow.statusMode = "WEIGHT"
+                            carTransTimer.restart()
+                        }
+                    }
 
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        if (appWindow.statusBgIndex > 1) {
-                                            appWindow.statusBgIndex = appWindow.statusBgIndex - 1
-                                        } else {
-                                            appWindow.statusBgIndex = 8
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                width: (parent.width - 8) / 2
-                                height: 32
-                                color: "#8005080E"
-                                border.color: "#1A2536"
-                                border.width: 1
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "NEXT BG (" + appWindow.statusBgIndex + "/8)"
-                                    color: "#8CA0B8"
-                                    font.pixelSize: 9
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        if (appWindow.statusBgIndex < 8) {
-                                            appWindow.statusBgIndex = appWindow.statusBgIndex + 1
-                                        } else {
-                                            appWindow.statusBgIndex = 1
-                                        }
-                                    }
-                                }
-                            }
+                    NeonPillBtn {
+                        btnText: "ECU WIREFRAME DIAGNOSTICS"
+                        isActive: appWindow.statusMode === "DIAGNOSTICS"
+                        glowColor: "#E63946"
+                        onClicked: {
+                            mainCarImage.opacity = 0.0
+                            mainCarImage.scale = 0.94
+                            appWindow.statusMode = "DIAGNOSTICS"
+                            carTransTimer.restart()
                         }
                     }
                 }
@@ -793,94 +563,40 @@ Window {
                 anchors.fill: parent
 
                 Row {
-                    anchors.fill: parent
-                    spacing: 16
+                    anchors.centerIn: parent
+                    spacing: 40
 
-                    Rectangle {
-                        width: parent.width * 0.55
-                        height: parent.height
-                        radius: 16
-                        color: "#0AFFFFFF"
-                        border.color: "#18FFFFFF"
-                        border.width: 1
+                    Column {
+                        spacing: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text { text: "0-100 KM/H ACCELERATION"; color: currentAccent; font.pixelSize: 11; font.bold: true }
+                        Text { text: vehicleSim.dragTime.toFixed(2) + " s"; color: "#FFFFFF"; font.pixelSize: 76; font.bold: true; font.family: "Consolas" }
+                        Text { text: "SESSION BEST: " + (vehicleSim.bestDragTime > 0 ? vehicleSim.bestDragTime.toFixed(2) + " s" : "--.-- s"); color: "#00E676"; font.pixelSize: 13; font.bold: true }
 
-                        Column {
-                            anchors.centerIn: parent
-                            spacing: 14
-
-                            Text { text: "ACCELERATION ANALYZER"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2; anchors.horizontalCenter: parent.horizontalCenter }
-
-                            Text {
-                                text: vehicleSim.dragTime.toFixed(2) + " s"
-                                color: vehicleSim.isDragRunning ? "#38BDF8" : "#FFFFFF"
-                                font.pixelSize: 52
-                                font.bold: true
-                                anchors.horizontalCenter: parent.horizontalCenter
-                            }
-
-                            Text {
-                                text: "BEST RECORD: " + (vehicleSim.bestDragTime > 0 ? vehicleSim.bestDragTime.toFixed(2) + " s" : "--.-- s")
-                                color: "#10B981"
-                                font.pixelSize: 13
-                                font.bold: true
-                                anchors.horizontalCenter: parent.horizontalCenter
-                            }
-
-                            Rectangle {
-                                width: 160
-                                height: 40
-                                radius: 6
-                                color: "#25FFFFFF"
-                                border.color: currentAccent
-                                border.width: 1
-                                anchors.horizontalCenter: parent.horizontalCenter
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "RESET / ARM TIMER"
-                                    color: "#FFFFFF"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        vehicleSim.resetDragTimer()
-                                    }
-                                }
-                            }
+                        Rectangle {
+                            width: 140
+                            height: 38
+                            radius: 19
+                            color: Qt.rgba(0, 0, 0, 0.6)
+                            border.color: currentAccent
+                            border.width: 1.5
+                            Text { anchors.centerIn: parent; text: "RESET TIMER"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: vehicleSim.resetDragTimer() }
                         }
                     }
 
-                    Rectangle {
-                        width: parent.width * 0.45 - 16
-                        height: parent.height
-                        radius: 16
-                        color: "#0AFFFFFF"
-                        border.color: "#18FFFFFF"
-                        border.width: 1
+                    Rectangle { width: 1; height: 180; color: Qt.rgba(1, 1, 1, 0.12); anchors.verticalCenter: parent.verticalCenter }
 
+                    Column {
+                        spacing: 24
+                        anchors.verticalCenter: parent.verticalCenter
                         Column {
-                            anchors.centerIn: parent
-                            spacing: 18
-
-                            Text { text: "DYNAMIC POWER GAUGE"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2; anchors.horizontalCenter: parent.horizontalCenter }
-
-                            Column {
-                                spacing: 6
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                Text { text: "CURRENT VELOCITY"; color: "#64748B"; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: vehicleSim.speed.toFixed(0) + " KM/H"; color: "#FFFFFF"; font.pixelSize: 28; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                            }
-
-                            Column {
-                                spacing: 6
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                Text { text: "TACHOMETER"; color: "#64748B"; font.pixelSize: 10; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: vehicleSim.rpm.toFixed(0) + " RPM"; color: "#38BDF8"; font.pixelSize: 28; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                            }
+                            Text { text: "INSTANT TORQUE"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
+                            Text { text: vehicleSim.speed.toFixed(0) + " KM/H"; color: "#FFFFFF"; font.pixelSize: 36; font.bold: true; font.family: "Consolas" }
+                        }
+                        Column {
+                            Text { text: "DRIVETRAIN RPM"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
+                            Text { text: vehicleSim.rpm.toFixed(0) + " RPM"; color: currentAccent; font.pixelSize: 36; font.bold: true; font.family: "Consolas" }
                         }
                     }
                 }
@@ -890,21 +606,32 @@ Window {
                 visible: activeTab === 3
                 anchors.fill: parent
 
-                Rectangle {
+                Item {
                     anchors.centerIn: parent
-                    width: Math.min(500, parent.width * 0.8)
-                    height: Math.min(260, parent.height * 0.7)
-                    radius: 16
-                    color: "#0AFFFFFF"
-                    border.color: "#18FFFFFF"
-                    border.width: 1
+                    width: 480
+                    height: 220
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 20
+                        color: Qt.rgba(8/255, 14/255, 26/255, 0.65)
+                        border.color: currentAccent
+                        border.width: 1.5
+                    }
 
                     Column {
                         anchors.centerIn: parent
-                        spacing: 16
-                        Text { text: "AUDIO SOURCE"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2; anchors.horizontalCenter: parent.horizontalCenter }
-                        Text { text: "NO DEVICE CONNECTED"; color: "#FFFFFF"; font.pixelSize: 18; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                        Text { text: "Ready for Bluetooth Sink Broadcast"; color: "#64748B"; font.pixelSize: 11; anchors.horizontalCenter: parent.horizontalCenter }
+                        spacing: 12
+                        Text { text: "BLUETOOTH AUDIO SINK"; color: currentAccent; font.pixelSize: 11; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Text { text: "Thomas Lammer - Setsuna"; color: "#FFFFFF"; font.pixelSize: 22; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+
+                        Row {
+                            spacing: 16
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            Rectangle { width: 42; height: 42; radius: 21; color: Qt.rgba(1,1,1,0.1); Text { anchors.centerIn: parent; text: "|<"; color: "#FFF"; font.bold: true } }
+                            Rectangle { width: 48; height: 48; radius: 24; color: currentAccent; Text { anchors.centerIn: parent; text: "||"; color: "#000"; font.bold: true } }
+                            Rectangle { width: 42; height: 42; radius: 21; color: Qt.rgba(1,1,1,0.1); Text { anchors.centerIn: parent; text: ">|"; color: "#FFF"; font.bold: true } }
+                        }
                     }
                 }
             }
@@ -915,156 +642,108 @@ Window {
 
                 Row {
                     anchors.fill: parent
-                    spacing: 16
+                    anchors.margins: 20
+                    spacing: 30
 
-                    Rectangle {
-                        width: parent.width * 0.58
-                        height: parent.height
-                        radius: 16
-                        color: "#0AFFFFFF"
-                        border.color: "#18FFFFFF"
-                        border.width: 1
+                    Column {
+                        width: parent.width * 0.45
+                        spacing: 18
 
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 18
+                        Text { text: "TELEMETRY ENGINE"; color: currentAccent; font.pixelSize: 11; font.bold: true }
+
+                        Row {
                             spacing: 16
+                            Column {
+                                Text { text: "DISTANCE"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
+                                Text { text: liveTripDist.toFixed(2) + " KM"; color: "#FFFFFF"; font.pixelSize: 26; font.bold: true; font.family: "Consolas" }
+                            }
+                            Column {
+                                Text { text: "EST. FUEL RATE"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
+                                Text { text: liveTripDist > 0.05 ? ((liveTripFuel / liveTripDist) * 100).toFixed(1) + " L/100KM" : "--.- L/100KM"; color: "#00E676"; font.pixelSize: 26; font.bold: true; font.family: "Consolas" }
+                            }
+                        }
 
-                            Text { text: "CURRENT TRIP METRICS"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2 }
-
-                            Grid {
-                                columns: 2
-                                spacing: 12
-
-                                Rectangle {
-                                    width: 190
-                                    height: 60
-                                    radius: 8
-                                    color: "#12FFFFFF"
-                                    Column {
-                                        anchors.centerIn: parent
-                                        Text { text: "LIVE DISTANCE"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                        Text { text: liveTripDist.toFixed(2) + " KM"; color: "#FFFFFF"; font.pixelSize: 15; font.bold: true }
-                                    }
+                        Row {
+                            spacing: 12
+                            Rectangle {
+                                width: 110
+                                height: 38
+                                radius: 19
+                                color: tripActive ? Qt.rgba(230/255, 57/255, 70/255, 0.4) : Qt.rgba(0, 230/255, 118/255, 0.4)
+                                border.color: tripActive ? "#E63946" : "#00E676"
+                                border.width: 1.5
+                                Text { anchors.centerIn: parent; text: tripActive ? "STOP TRIP" : "START TRIP"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: tripActive = !tripActive
                                 }
+                            }
 
-                                Rectangle {
-                                    width: 190
-                                    height: 60
-                                    radius: 8
-                                    color: "#12FFFFFF"
-                                    Column {
-                                        anchors.centerIn: parent
-                                        Text { text: "AVG CONSUMPTION"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                        Text {
-                                            text: liveTripDist > 0 ? ((liveTripFuel / liveTripDist) * 100).toFixed(1) + " L/100KM" : "0.0 L/100KM"
-                                            color: "#10B981"
-                                            font.pixelSize: 15
-                                            font.bold: true
-                                        }
+                            Rectangle {
+                                width: 110
+                                height: 38
+                                radius: 19
+                                color: Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.3)
+                                border.color: currentAccent
+                                border.width: 1.5
+
+                                Text { anchors.centerIn: parent; text: "LOG TRIP"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        var copy = savedTripLogs.slice()
+                                        var avgCons = liveTripDist > 0.05 ? ((liveTripFuel / liveTripDist) * 100).toFixed(1) : "0.0"
+                                        copy.push(liveTripDist.toFixed(2) + " KM @ " + avgCons + " L/100KM")
+                                        savedTripLogs = copy
                                     }
                                 }
                             }
 
-                            Row {
-                                spacing: 12
-                                Rectangle {
-                                    width: 110
-                                    height: 38
-                                    radius: 6
-                                    color: tripActive ? "#25EF4444" : "#2510B981"
-                                    border.color: tripActive ? "#EF4444" : "#10B981"
-                                    border.width: 1
-                                    Text { anchors.centerIn: parent; text: tripActive ? "STOP TRIP" : "NEW TRIP"; color: "#FFFFFF"; font.pixelSize: 10; font.bold: true }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            if (!tripActive) {
-                                                liveTripDist = 0.0
-                                                liveTripFuel = 0.0
-                                                tripActive = true
-                                            } else {
-                                                tripActive = false
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Rectangle {
-                                    width: 110
-                                    height: 38
-                                    radius: 6
-                                    color: "#20FFFFFF"
-                                    border.color: currentAccent
-                                    border.width: 1
-                                    Text { anchors.centerIn: parent; text: "SAVE TRIP"; color: "#FFFFFF"; font.pixelSize: 10; font.bold: true }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            if (liveTripDist > 0.0) {
-                                                var copy = savedTripLogs.slice()
-                                                var avgCons = ((liveTripFuel / liveTripDist) * 100).toFixed(1)
-                                                copy.push(liveTripDist.toFixed(1) + " KM @ " + avgCons + " L/100KM")
-                                                savedTripLogs = copy
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Rectangle {
-                                    width: 110
-                                    height: 38
-                                    radius: 6
-                                    color: "#15FFFFFF"
-                                    border.color: "#30FFFFFF"
-                                    border.width: 1
-                                    Text { anchors.centerIn: parent; text: "RESET"; color: "#FFFFFF"; font.pixelSize: 10; font.bold: true }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            tripActive = false
-                                            liveTripDist = 0.0
-                                            liveTripFuel = 0.0
-                                        }
+                            Rectangle {
+                                width: 80
+                                height: 38
+                                radius: 19
+                                color: Qt.rgba(0, 0, 0, 0.5)
+                                border.color: "#475569"
+                                border.width: 1.5
+                                Text { anchors.centerIn: parent; text: "RESET"; color: "#94A3B8"; font.pixelSize: 9; font.bold: true }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        tripActive = false
+                                        liveTripDist = 0.0
+                                        liveTripFuel = 0.0
                                     }
                                 }
                             }
                         }
                     }
 
-                    Rectangle {
-                        width: parent.width * 0.42 - 16
+                    Rectangle { width: 1; height: parent.height; color: Qt.rgba(1, 1, 1, 0.1) }
+
+                    ListView {
+                        width: parent.width * 0.48
                         height: parent.height
-                        radius: 16
-                        color: "#0AFFFFFF"
-                        border.color: "#18FFFFFF"
-                        border.width: 1
-
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 10
-
-                            Text { text: "SAVED TRIPS LOG"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2 }
-
-                            ListView {
-                                width: parent.width
-                                height: parent.height - 40
-                                clip: true
-                                model: savedTripLogs
-                                spacing: 6
-                                delegate: Rectangle {
-                                    width: parent.width
-                                    height: 32
-                                    radius: 6
-                                    color: "#14FFFFFF"
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "Log #" + (index + 1) + ": " + modelData
-                                        color: "#FFFFFF"
-                                        font.pixelSize: 10
-                                    }
-                                }
+                        clip: true
+                        model: savedTripLogs
+                        spacing: 8
+                        delegate: Rectangle {
+                            width: parent.width
+                            height: 34
+                            radius: 17
+                            color: Qt.rgba(8/255, 14/255, 26/255, 0.6)
+                            border.color: Qt.rgba(1, 1, 1, 0.12)
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Log #" + (index + 1) + ": " + modelData
+                                color: "#E2E8F0"
+                                font.pixelSize: 9
+                                font.bold: true
+                                font.family: "Consolas"
                             }
                         }
                     }
@@ -1075,130 +754,113 @@ Window {
                 visible: activeTab === 5
                 anchors.fill: parent
 
-                Row {
+                Column {
                     anchors.centerIn: parent
-                    spacing: 20
+                    spacing: 18
 
-                    Rectangle {
-                        width: 380
-                        height: 320
-                        radius: 16
-                        color: "#0AFFFFFF"
-                        border.color: "#18FFFFFF"
-                        border.width: 1
+                    Text { text: "PREFERENCES & COCKPIT ARCHITECTURE"; color: currentAccent; font.pixelSize: 11; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
 
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 18
-                            spacing: 16
+                    Column {
+                        spacing: 8
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        Text { text: "CLUSTER DISPLAY LAYOUT MODE"; color: "#64748B"; font.pixelSize: 8; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Row {
+                            spacing: 12
+                            anchors.horizontalCenter: parent.horizontalCenter
 
-                            Text { text: "WALLPAPER & MEDIA ENGINE"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2 }
+                            Rectangle {
+                                width: 140
+                                height: 34
+                                radius: 17
+                                color: clusterLayoutMode === 0 ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.35) : Qt.rgba(0, 0, 0, 0.5)
+                                border.color: clusterLayoutMode === 0 ? currentAccent : Qt.rgba(1, 1, 1, 0.15)
+                                border.width: 1.5
+                                Text { anchors.centerIn: parent; text: "QUL DUAL RING"; color: "#FFFFFF"; font.pixelSize: 8; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: clusterLayoutMode = 0 }
+                            }
 
-                            Column {
-                                spacing: 6
-                                Text { text: "BACKGROUND RENDER MODE"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                Row {
-                                    spacing: 8
-                                    Rectangle {
-                                        width: 80
-                                        height: 30
-                                        radius: 6
-                                        color: bgMode === 0 ? "#30FFFFFF" : "#12FFFFFF"
-                                        border.color: bgMode === 0 ? currentAccent : "transparent"
-                                        Text { anchors.centerIn: parent; text: "GRADIENT"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: {
-                                                bgMode = 0
-                                            }
-                                        }
-                                    }
-                                    Rectangle {
-                                        width: 80
-                                        height: 30
-                                        radius: 6
-                                        color: bgMode === 1 ? "#30FFFFFF" : "#12FFFFFF"
-                                        border.color: bgMode === 1 ? currentAccent : "transparent"
-                                        Text { anchors.centerIn: parent; text: "STATIC 4K"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: {
-                                                bgMode = 1
-                                            }
-                                        }
-                                    }
-                                    Rectangle {
-                                        width: 80
-                                        height: 30
-                                        radius: 6
-                                        color: bgMode === 2 ? "#30FFFFFF" : "#12FFFFFF"
-                                        border.color: bgMode === 2 ? currentAccent : "transparent"
-                                        Text { anchors.centerIn: parent; text: "LIVE MP4"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: {
-                                                bgMode = 2
-                                                livePlayer.play()
-                                            }
-                                        }
+                            Rectangle {
+                                width: 140
+                                height: 34
+                                radius: 17
+                                color: clusterLayoutMode === 1 ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.35) : Qt.rgba(0, 0, 0, 0.5)
+                                border.color: clusterLayoutMode === 1 ? currentAccent : Qt.rgba(1, 1, 1, 0.15)
+                                border.width: 1.5
+                                Text { anchors.centerIn: parent; text: "MINIMAL HUD"; color: "#FFFFFF"; font.pixelSize: 8; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: clusterLayoutMode = 1 }
+                            }
+
+                            Rectangle {
+                                width: 140
+                                height: 34
+                                radius: 17
+                                color: clusterLayoutMode === 2 ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.35) : Qt.rgba(0, 0, 0, 0.5)
+                                border.color: clusterLayoutMode === 2 ? currentAccent : Qt.rgba(1, 1, 1, 0.15)
+                                border.width: 1.5
+                                Text { anchors.centerIn: parent; text: "PERFORMANCE 3D"; color: "#FFFFFF"; font.pixelSize: 8; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: clusterLayoutMode = 2 }
+                            }
+                        }
+                    }
+
+                    Column {
+                        spacing: 8
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        Text { text: "AMBIENT SIGNATURE"; color: "#64748B"; font.pixelSize: 8; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Row {
+                            spacing: 12
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            Repeater {
+                                model: themeColors
+                                Rectangle {
+                                    width: 32
+                                    height: 32
+                                    radius: 16
+                                    color: modelData
+                                    border.color: themeColorIndex === index ? "#FFFFFF" : "transparent"
+                                    border.width: 2
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: themeColorIndex = index
                                     }
                                 }
                             }
+                        }
+                    }
 
-                            Column {
-                                spacing: 6
-                                Text { text: "BACKGROUND DIM OPACITY (" + (bgDimOpacity * 100).toFixed(0) + "%)"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                Row {
-                                    spacing: 8
-                                    Rectangle {
-                                        width: 30
-                                        height: 28
-                                        radius: 4
-                                        color: "#20FFFFFF"
-                                        Text { anchors.centerIn: parent; text: "-"; color: "#FFFFFF" }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: {
-                                                bgDimOpacity = Math.max(0.1, bgDimOpacity - 0.1)
-                                            }
-                                        }
-                                    }
-                                    Rectangle {
-                                        width: 30
-                                        height: 28
-                                        radius: 4
-                                        color: "#20FFFFFF"
-                                        Text { anchors.centerIn: parent; text: "+"; color: "#FFFFFF" }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: {
-                                                bgDimOpacity = Math.min(0.9, bgDimOpacity + 0.1)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                    Column {
+                        spacing: 8
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        Text { text: "LIVE BACKGROUND PRESETS (1-8)"; color: "#64748B"; font.pixelSize: 8; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Row {
+                            spacing: 8
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            Repeater {
+                                model: 8
+                                Rectangle {
+                                    width: 58
+                                    height: 34
+                                    radius: 17
+                                    color: currentWallpaperIndex === (index + 1) ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.35) : Qt.rgba(0, 0, 0, 0.5)
+                                    border.color: currentWallpaperIndex === (index + 1) ? currentAccent : Qt.rgba(1, 1, 1, 0.15)
+                                    border.width: 1.5
 
-                            Column {
-                                spacing: 6
-                                Text { text: "ACCENT PALETTE"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                Row {
-                                    spacing: 10
-                                    Repeater {
-                                        model: themeColors
-                                        Rectangle {
-                                            width: 26
-                                            height: 26
-                                            radius: 13
-                                            color: modelData
-                                            border.color: themeColorIndex === index ? "#FFFFFF" : "transparent"
-                                            border.width: 2
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    themeColorIndex = index
-                                                }
-                                            }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "BG " + (index + 1)
+                                        color: currentWallpaperIndex === (index + 1) ? currentAccent : "#94A3B8"
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            currentWallpaperIndex = index + 1
+                                            bgVideoPlayer.source = Qt.resolvedUrl("../../assets/backgrounds/live_bg_" + (index + 1) + ".mp4")
+                                            bgVideoPlayer.play()
                                         }
                                     }
                                 }
@@ -1206,144 +868,39 @@ Window {
                         }
                     }
 
-                    Rectangle {
-                        width: 380
-                        height: 320
-                        radius: 16
-                        color: "#0AFFFFFF"
-                        border.color: "#18FFFFFF"
-                        border.width: 1
-
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 18
-                            spacing: 16
-
-                            Text { text: "LAYOUT & TIME CALIBRATION"; color: currentAccent; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2 }
-
-                            Column {
-                                spacing: 6
-                                Text { text: "HOME LAYOUT VIEW"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                Row {
-                                    spacing: 8
-                                    Rectangle {
-                                        width: 110
-                                        height: 30
-                                        radius: 6
-                                        color: layoutMode === 0 ? "#30FFFFFF" : "#12FFFFFF"
-                                        border.color: layoutMode === 0 ? currentAccent : "transparent"
-                                        Text { anchors.centerIn: parent; text: "COCKPIT"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: {
-                                                layoutMode = 0
-                                            }
-                                        }
-                                    }
-                                    Rectangle {
-                                        width: 110
-                                        height: 30
-                                        radius: 6
-                                        color: layoutMode === 1 ? "#30FFFFFF" : "#12FFFFFF"
-                                        border.color: layoutMode === 1 ? currentAccent : "transparent"
-                                        Text { anchors.centerIn: parent; text: "FULL GRID"; color: "#FFFFFF"; font.pixelSize: 9; font.bold: true }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: {
-                                                layoutMode = 1
-                                            }
-                                        }
-                                    }
-                                }
+                    Column {
+                        spacing: 8
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        Text { text: "GLASS OPACITY"; color: "#64748B"; font.pixelSize: 8; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                        Row {
+                            spacing: 10
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            Rectangle {
+                                width: 110
+                                height: 32
+                                radius: 16
+                                color: bgDimOpacity === 0.25 ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.3) : Qt.rgba(0, 0, 0, 0.5)
+                                border.color: bgDimOpacity === 0.25 ? currentAccent : Qt.rgba(1, 1, 1, 0.15)
+                                Text { anchors.centerIn: parent; text: "LIGHT (25%)"; color: "#FFFFFF"; font.pixelSize: 8; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bgDimOpacity = 0.25 }
                             }
-
-                            Row {
-                                spacing: 20
-                                Column {
-                                    spacing: 4
-                                    Text { text: "HOUR"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                    Row {
-                                        spacing: 6
-                                        Rectangle {
-                                            width: 28
-                                            height: 28
-                                            radius: 4
-                                            color: "#20FFFFFF"
-                                            Text { anchors.centerIn: parent; text: "-"; color: "#FFFFFF" }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    if (manualHour > 0) {
-                                                        manualHour = manualHour - 1
-                                                    } else {
-                                                        manualHour = 23
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Text { text: (manualHour < 10 ? "0" + manualHour : manualHour); color: "#FFFFFF"; font.pixelSize: 15; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                                        Rectangle {
-                                            width: 28
-                                            height: 28
-                                            radius: 4
-                                            color: "#20FFFFFF"
-                                            Text { anchors.centerIn: parent; text: "+"; color: "#FFFFFF" }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    if (manualHour < 23) {
-                                                        manualHour = manualHour + 1
-                                                    } else {
-                                                        manualHour = 0
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Column {
-                                    spacing: 4
-                                    Text { text: "MINUTE"; color: "#64748B"; font.pixelSize: 9; font.bold: true }
-                                    Row {
-                                        spacing: 6
-                                        Rectangle {
-                                            width: 28
-                                            height: 28
-                                            radius: 4
-                                            color: "#20FFFFFF"
-                                            Text { anchors.centerIn: parent; text: "-"; color: "#FFFFFF" }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    if (manualMinute > 0) {
-                                                        manualMinute = manualMinute - 1
-                                                    } else {
-                                                        manualMinute = 59
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Text { text: (manualMinute < 10 ? "0" + manualMinute : manualMinute); color: "#FFFFFF"; font.pixelSize: 15; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                                        Rectangle {
-                                            width: 28
-                                            height: 28
-                                            radius: 4
-                                            color: "#20FFFFFF"
-                                            Text { anchors.centerIn: parent; text: "+"; color: "#FFFFFF" }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    if (manualMinute < 59) {
-                                                        manualMinute = manualMinute + 1
-                                                    } else {
-                                                        manualMinute = 0
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            Rectangle {
+                                width: 110
+                                height: 32
+                                radius: 16
+                                color: bgDimOpacity === 0.40 ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.3) : Qt.rgba(0, 0, 0, 0.5)
+                                border.color: bgDimOpacity === 0.40 ? currentAccent : Qt.rgba(1, 1, 1, 0.15)
+                                Text { anchors.centerIn: parent; text: "BALANCED (40%)"; color: "#FFFFFF"; font.pixelSize: 8; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bgDimOpacity = 0.40 }
+                            }
+                            Rectangle {
+                                width: 110
+                                height: 32
+                                radius: 16
+                                color: bgDimOpacity === 0.70 ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.3) : Qt.rgba(0, 0, 0, 0.5)
+                                border.color: bgDimOpacity === 0.70 ? currentAccent : Qt.rgba(1, 1, 1, 0.15)
+                                Text { anchors.centerIn: parent; text: "TINTED (70%)"; color: "#FFFFFF"; font.pixelSize: 8; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bgDimOpacity = 0.70 }
                             }
                         }
                     }
@@ -1351,132 +908,103 @@ Window {
             }
         }
 
-        Rectangle {
-            id: navigationDock
+        Item {
+            id: dsNavRack
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            height: 52
-            color: "#16000000"
-            border.color: "#18FFFFFF"
-            border.width: 1
-            z: 20
+            height: 48
+            z: 30
 
             Row {
                 anchors.centerIn: parent
-                spacing: 12
+                spacing: 8
 
-                component DockButton : Rectangle {
-                    property string dTitle: ""
-                    property int dIndex: 0
+                component BottomTabBtn : Rectangle {
+                    property string bTitle: ""
+                    property int bTarget: 0
 
                     width: 120
                     height: 34
-                    radius: 6
-                    color: activeTab === dIndex ? "#30FFFFFF" : (dockM.containsMouse ? "#18FFFFFF" : "#0AFFFFFF")
-                    border.color: activeTab === dIndex ? currentAccent : "#18FFFFFF"
-                    border.width: activeTab === dIndex ? 1.5 : 1
+                    radius: 17
+                    color: activeTab === bTarget ? Qt.rgba(currentAccent.r, currentAccent.g, currentAccent.b, 0.3) : Qt.rgba(0, 0, 0, 0.5)
+                    border.color: activeTab === bTarget ? currentAccent : Qt.rgba(1, 1, 1, 0.12)
+                    border.width: 1.5
 
                     Text {
                         anchors.centerIn: parent
-                        text: dTitle
-                        color: activeTab === dIndex ? currentAccent : "#94A3B8"
-                        font.pixelSize: 10
+                        text: bTitle
+                        color: activeTab === bTarget ? currentAccent : "#94A3B8"
+                        font.pixelSize: 9
                         font.bold: true
-                        font.letterSpacing: 1
                     }
 
                     MouseArea {
-                        id: dockM
                         anchors.fill: parent
-                        hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            activeTab = dIndex
-                        }
+                        onClicked: activeTab = bTarget
                     }
                 }
 
-                DockButton { dTitle: "COCKPIT"; dIndex: 0 }
-                DockButton { dTitle: "STATUS"; dIndex: 1 }
-                DockButton { dTitle: "DYNAMICS"; dIndex: 2 }
-                DockButton { dTitle: "MEDIA"; dIndex: 3 }
-                DockButton { dTitle: "TRIP"; dIndex: 4 }
-                DockButton { dTitle: "SETTINGS"; dIndex: 5 }
+                BottomTabBtn { bTitle: "COCKPIT"; bTarget: 0 }
+                BottomTabBtn { bTitle: "STATUS"; bTarget: 1 }
+                BottomTabBtn { bTitle: "DYNAMICS"; bTarget: 2 }
+                BottomTabBtn { bTitle: "MEDIA"; bTarget: 3 }
+                BottomTabBtn { bTitle: "TRIP"; bTarget: 4 }
+                BottomTabBtn { bTitle: "SETTINGS"; bTarget: 5 }
             }
         }
     }
 
-    Rectangle {
-        id: bootSplash
+    Item {
+        id: splashOverlay
         anchors.fill: parent
-        color: "#000000"
-        z: 999
-        visible: opacity > 0.0
+        visible: !splashFinished
+        z: 100
 
-        Behavior on opacity {
-            NumberAnimation { duration: 600; easing.type: Easing.InOutQuad }
+        SoundEffect {
+            id: whooshAudio
+            source: "qrc:/startup_whoosh.wav"
         }
 
-        Column {
+        Rectangle {
+            anchors.fill: parent
+            color: "#000000"
+        }
+
+        Image {
+            id: brandSplashLogo
             anchors.centerIn: parent
-            spacing: 20
-
-            Image {
-                id: bootLogo
-                source: "qrc:/citroen_logo.png"
-                width: 220
-                height: 170
-                fillMode: Image.PreserveAspectFit
-                anchors.horizontalCenter: parent.horizontalCenter
-                opacity: 0.0
-                scale: 0.85
-            }
-
-            Item {
-                id: textContainer
-                width: 320
-                height: 30
-                anchors.horizontalCenter: parent.horizontalCenter
-                opacity: 0.0
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "LUMINUS AUTOMOTIVE OS"
-                    color: currentAccent
-                    font.pixelSize: 12
-                    font.letterSpacing: 6
-                    font.bold: true
-                }
-            }
+            width: 260
+            fillMode: Image.PreserveAspectFit
+            source: "qrc:/citroen_logo.png"
+            opacity: 0.0
+            scale: 0.85
         }
 
         SequentialAnimation {
-            id: cinematicIntro
+            id: splashSequence
             running: true
 
-            PauseAnimation { duration: 200 }
+            ScriptAction { script: whooshAudio.play() }
 
             ParallelAnimation {
-                NumberAnimation { target: bootLogo; property: "opacity"; to: 1.0; duration: 800; easing.type: Easing.OutQuad }
-                NumberAnimation { target: bootLogo; property: "scale"; to: 1.0; duration: 1000; easing.type: Easing.OutBack }
+                NumberAnimation { target: brandSplashLogo; property: "opacity"; from: 0.0; to: 1.0; duration: 900; easing.type: Easing.OutCubic }
+                NumberAnimation { target: brandSplashLogo; property: "scale"; from: 0.85; to: 1.0; duration: 1100; easing.type: Easing.OutCubic }
             }
 
-            ParallelAnimation {
-                NumberAnimation { target: textContainer; property: "opacity"; to: 1.0; duration: 500 }
-            }
-
-            PauseAnimation { duration: 1200 }
+            PauseAnimation { duration: 500 }
 
             ParallelAnimation {
-                NumberAnimation { target: bootLogo; property: "opacity"; to: 0.0; duration: 400; easing.type: Easing.InQuad }
-                NumberAnimation { target: textContainer; property: "opacity"; to: 0.0; duration: 300 }
+                NumberAnimation { target: brandSplashLogo; property: "opacity"; to: 0.0; duration: 500; easing.type: Easing.InQuad }
+                NumberAnimation { target: splashOverlay; property: "opacity"; to: 0.0; duration: 600 }
             }
 
             ScriptAction {
                 script: {
-                    bootSplash.opacity = 0.0
-                    mainInterface.opacity = 1.0
+                    splashFinished = true
+                    splashOverlay.visible = false
+                    gaugeSweepAnimation.start()
                 }
             }
         }
