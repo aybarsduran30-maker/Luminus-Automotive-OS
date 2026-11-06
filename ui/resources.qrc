@@ -3,6 +3,7 @@
         <file>citroen_logo.png</file>
         <file>startup_whoosh.wav</file>
         <file>qml/Main.qml</file>
+        <file>qml/CockpitPages.qml</file>
         <file>qml/FrenchTelemetryWidget.qml</file>
         <file>qml/ExpandedCluster.qml</file>
         <file>../assets/vehicles/car_left.png</file>
